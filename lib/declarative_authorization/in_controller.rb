@@ -118,10 +118,10 @@ module Authorization
 
       unless allowed
         if all_permissions.empty? and matching_permissions.empty?
-          logger.warn "Permission denied: No matching filter access " +
-            "rule found for #{self.class.controller_name}.#{action_name}"
+          #logger.warn "Permission denied: No matching filter access " +
+          #  "rule found for #{self.class.controller_name}.#{action_name}"
         elsif auth_exception
-          logger.info "Permission denied: #{auth_exception}"
+          #logger.info "Permission denied: #{auth_exception}"
         end
         if respond_to?(:permission_denied)
           # permission_denied needs to render or redirect
