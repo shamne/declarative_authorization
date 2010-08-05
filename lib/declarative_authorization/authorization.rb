@@ -232,8 +232,8 @@ module Authorization
       raise AuthorizationUsageError, "User object doesn't respond to roles (#{user.inspect})" \
         if !user.respond_to?(:role_symbols) and !user.respond_to?(:roles)
 
-      RAILS_DEFAULT_LOGGER.info("The use of user.roles is deprecated.  Please add a method " +
-          "role_symbols to your User model.") if defined?(RAILS_DEFAULT_LOGGER) and !user.respond_to?(:role_symbols)
+      #RAILS_DEFAULT_LOGGER.info("The use of user.roles is deprecated.  Please add a method " +
+      #    "role_symbols to your User model.") if defined?(RAILS_DEFAULT_LOGGER) and !user.respond_to?(:role_symbols)
 
       roles = user.respond_to?(:role_symbols) ? user.role_symbols : user.roles
 
