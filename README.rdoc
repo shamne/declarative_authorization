@@ -192,13 +192,13 @@ See also Authorization::AuthorizationHelper.
 
 == Models
 
-There are two destinct features for model security built into this plugin:
+There are two distinct features for model security built into this plugin:
 authorizing CRUD operations on objects as well as query rewriting to limit
 results according to certain privileges.
 
 See also Authorization::AuthorizationInModel.
 
-=== Model security for CRUD opterations
+=== Model security for CRUD operations
 To activate model security, all it takes is an explicit enabling for each
 model that model security should be enforced on, i.e.
 
@@ -215,7 +215,7 @@ happened if an operation is denied, the filters throw
 Authorization::NotAuthorized exceptions.
 
 As access control on read are costly, with possibly lots of objects being
-loaded at a time in one query, checks on read need to be actived explicitly by
+loaded at a time in one query, checks on read need to be activated explicitly by
 adding the :include_read option.
 
 === Query rewriting through named scopes
@@ -255,6 +255,11 @@ with any user or with a user without any roles.  So, if your application has
 public pages, :+guest+ can be used to allow access for users that are not
 logged in.  All other roles are application defined and need to be associated
 with users by the application.
+
+If you need to change the default role, you can do so by adding an initializer
+that contains the following statement:
+
+    Authorization.default_role = :anonymous
 
 Privileges, such as :create, may be put into hierarchies to simplify
 maintenance.  So the example above has the same meaning as
@@ -332,6 +337,12 @@ In your test_helper.rb, to enable the helpers add
       ...
     end
 
+For using the test helpers with RSpec, just add the following lines to your
+spec_helper.rb (somewhere after require 'spec/rails'):
+
+    require 'declarative_authorization/maintenance'
+    include Authorization::TestHelper
+
 Now, in unit tests, you may deactivate authorization if needed e.g. for test
 setup and assume certain identities for tests:
 
@@ -347,6 +358,19 @@ setup and assume certain identities for tests:
         end
       end
     end
+    
+Or, with RSpec, it would work like this:
+
+  describe Employee do
+    it "should read" do
+      without_access_control do
+        Employee.create(...)
+      end
+      with_user(admin) do
+        Employee.find(:first)
+      end
+    end
+  end
 
 In functional tests, get, posts, etc. may be tested in the name of certain users:
 
@@ -366,10 +390,8 @@ One of three options to install the plugin:
     gem tumble
   And call from your application's root directory
     rake gems:install
-* Alternatively, to install from github, execute in your application's root directory
+* Alternativelyi, in Rails 2, to install from github, execute in your application's root directory
     cd vendor/plugins && git clone git://github.com/stffn/declarative_authorization.git
-* Or, download one of the released versions from Github at
-  http://github.com/stffn/declarative_authorization/downloads
 
 Then, 
 * provide the requirements as noted below, 
@@ -491,13 +513,14 @@ sbartsch at tzi.org
 
 = Contributors
 
-Thanks to John Joseph Bachir, Eike Carls, Kai Chen, Erik Dahlstrand, Jeroen van Dijk,
-Alexander Dobriakov, Sebastian Dyck, Ari Epstein, Jeremy Friesen, Tim Harper, hollownest,
-Daniel Kristensen, Brian Langenfeld, Georg Ledermann, Geoff Longman, Olly Lylo, Mark Mansour,
-Thomas Maurer, TJ Singleton, Mike Vincent
+Thanks to John Joseph Bachir, Eike Carls, Dennis Blöte, Kai Chen, Erik Dahlstrand,
+Jeroen van Dijk, Alexander Dobriakov, Sebastian Dyck, Ari Epstein, Jeremy Friesen,
+Tim Harper, hollownest, Daniel Kristensen, Jeremy Kleindl, Brad Langhorst, Brian Langenfeld,
+Georg Ledermann, Geoff Longman, Olly Lylo, Mark Mansour, Thomas Maurer, Tyler Pickett, Sharagoz,
+TJ Singleton, Mike Vincent, Joel Westerberg
 
 
-= Licence
+= License
 
 Copyright (c) 2008 Steffen Bartsch, TZI, Universität Bremen, Germany
 released under the MIT license

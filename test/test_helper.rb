@@ -62,7 +62,7 @@ class MockDataObject
   end
   
   def self.find(*args)
-    raise "Couldn't find #{self.name} with id #{args[0].inspect}" unless args[0]
+    raise StandardError, "Couldn't find #{self.name} with id #{args[0].inspect}" unless args[0]
     new :id => args[0]
   end
 end
@@ -70,7 +70,7 @@ end
 class MockUser < MockDataObject
   def initialize (*roles)
     options = roles.last.is_a?(::Hash) ? roles.pop : {}
-    super(options.merge(:role_symbols => roles, :login => hash))
+    super({:role_symbols => roles, :login => hash}.merge(options))
   end
 
   def initialize_copy (other)
@@ -118,7 +118,8 @@ if Rails.version < "3"
     map.connect ':controller/:action/:id'
   end
 else
-  Rails::Application.routes.draw do
+  #Rails::Application.routes.draw do
+  Rails.application.routes.draw do
     match '/name/spaced_things(/:action)' => 'name/spaced_things'
     match '/deep/name_spaced/things(/:action)' => 'deep/name_spaced/things'
     match '/:controller(/:action(/:id))'
@@ -146,7 +147,8 @@ class Test::Unit::TestCase
 
   unless Rails.version < "3"
     def setup
-      @routes = Rails::Application.routes
+      #@routes = Rails::Application.routes
+      @routes = Rails.application.routes
     end
   end
 end

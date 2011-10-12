@@ -9,7 +9,7 @@ module Authorization
   # NotAuthorized is raised if the current user is not allowed to perform
   # the given operation possibly on a specific object.
   class NotAuthorized < AuthorizationError ; end
-  # AttributeAuthorizationError is more specific than NotAuthorized, signalling
+  # AttributeAuthorizationError is more specific than NotAuthorized, signaling
   # that the access was denied on the grounds of attribute conditions.
   class AttributeAuthorizationError < NotAuthorized ; end
   # AuthorizationUsageError is used whenever a situation is encountered
@@ -20,12 +20,12 @@ module Authorization
   # The exception is raised to ensure that the entire rule is invalidated.
   class NilAttributeValueError < AuthorizationError; end
   
-  AUTH_DSL_FILES = [(Rails.root || Pathname.new('')).join("config", "authorization_rules.rb").to_s] unless defined? AUTH_DSL_FILES
+  AUTH_DSL_FILES = [Pathname.new(Rails.root || '').join("config", "authorization_rules.rb").to_s] unless defined? AUTH_DSL_FILES
   
   # Controller-independent method for retrieving the current user.
   # Needed for model security where the current controller is not available.
   def self.current_user
-    Thread.current["current_user"] || GuestUser.new
+    Thread.current["current_user"] || AnonymousUser.new
   end
   
   # Controller-independent method for setting the current user.
@@ -52,6 +52,15 @@ module Authorization
     @@dot_path = path
   end
   
+  @@default_role = :guest
+  def self.default_role
+    @@default_role
+  end
+
+  def self.default_role= (role)
+    @@default_role = role.to_sym
+  end
+  
   # Authorization::Engine implements the reference monitor.  It may be used
   # for querying the permission and retrieving obligations under which
   # a certain privilege is granted for the current user.
@@ -70,7 +79,7 @@ module Authorization
       @privileges = reader.privileges_reader.privileges
       # {priv => [[priv, ctx],...]}
       @privilege_hierarchy = reader.privileges_reader.privilege_hierarchy
-      @auth_rules = reader.auth_rules_reader.auth_rules
+      @auth_rules = AuthorizationRuleSet.new reader.auth_rules_reader.auth_rules
       @roles = reader.auth_rules_reader.roles
       @omnipotent_roles = reader.auth_rules_reader.omnipotent_roles
       @role_hierarchy = reader.auth_rules_reader.role_hierarchy
@@ -98,9 +107,8 @@ module Authorization
     def initialize_copy (from) # :nodoc:
       [
         :privileges, :privilege_hierarchy, :roles, :role_hierarchy, :role_titles,
-        :role_descriptions, :rev_priv_hierarchy, :rev_role_hierarchy
+        :role_descriptions, :rev_priv_hierarchy, :rev_role_hierarchy, :auth_rules
       ].each {|attr| instance_variable_set(:"@#{attr}", from.send(attr).clone) }
-      @auth_rules = from.auth_rules.collect {|rule| rule.clone}
     end
     
     # Returns true if privilege is met by the current user.  Raises
@@ -113,7 +121,7 @@ module Authorization
     #   The context part of the privilege.
     #   Defaults either to the tableized +class_name+ of the given :+object+, if given.
     #   That is, :+users+ for :+object+ of type User.  
-    #   Raises AuthorizationUsageError if context is missing and not to be infered.
+    #   Raises AuthorizationUsageError if context is missing and not to be inferred.
     # [:+object+] An context object to test attribute checks against.
     # [:+skip_attribute_test+]
     #   Skips those attribute checks in the 
@@ -121,13 +129,17 @@ module Authorization
     # [:+user+] 
     #   The user to check the authorization for.
     #   Defaults to Authorization#current_user.
+    # [:+bang+]
+    #   Should NotAuthorized exceptions be raised
+    #   Defaults to true.
     #
     def permit! (privilege, options = {})
       return true if Authorization.ignore_access_control
       options = {
         :object => nil,
         :skip_attribute_test => false,
-        :context => nil
+        :context => nil,
+        :bang => true
       }.merge(options)
       
       # Make sure we're handling all privileges as symbols.
@@ -160,28 +172,34 @@ module Authorization
       # at least one of the given privileges
       attr_validator = AttributeValidator.new(self, user, options[:object], privilege, options[:context])
       rules = matching_auth_rules(roles, privileges, options[:context])
-      if rules.empty?
-        raise NotAuthorized, "No matching rules found for #{privilege} for #{user.inspect} " +
-          "(roles #{roles.inspect}, privileges #{privileges.inspect}, " +
-          "context #{options[:context].inspect})."
-      end
       
       # Test each rule in turn to see whether any one of them is satisfied.
-      unless rules.any? {|rule| rule.validate?(attr_validator, options[:skip_attribute_test])}
-        raise AttributeAuthorizationError, "#{privilege} not allowed for #{user.inspect} on #{(options[:object] || options[:context]).inspect}."
+      rules.each do |rule|
+        return true if rule.validate?(attr_validator, options[:skip_attribute_test])
       end
-      true
+
+      if options[:bang]
+        if rules.empty?
+          raise NotAuthorized, "No matching rules found for #{privilege} for #{user.inspect} " +
+            "(roles #{roles.inspect}, privileges #{privileges.inspect}, " +
+            "context #{options[:context].inspect})."
+        else
+          raise AttributeAuthorizationError, "#{privilege} not allowed for #{user.inspect} on #{(options[:object] || options[:context]).inspect}."
+        end
+      else
+        false
+      end
     end
     
-    # Calls permit! but rescues the AuthorizationException and returns false
-    # instead.  If no exception is raised, permit? returns true and yields
-    # to the optional block.
-    def permit? (privilege, options = {}, &block) # :yields:
-      permit!(privilege, options)
-      yield if block_given?
-      true
-    rescue NotAuthorized
-      false
+    # Calls permit! but doesn't raise authorization errors. If no exception is
+    # raised, permit? returns true and yields  to the optional block.
+    def permit? (privilege, options = {}) # :yields:
+      if permit!(privilege, options.merge(:bang=> false))
+        yield if block_given?
+        true
+      else
+        false
+      end
     end
     
     # Returns the obligations to be met by the current user for the given 
@@ -231,17 +249,17 @@ module Authorization
       user ||= Authorization.current_user
       raise AuthorizationUsageError, "User object doesn't respond to roles (#{user.inspect})" \
         if !user.respond_to?(:role_symbols) and !user.respond_to?(:roles)
-
-      #RAILS_DEFAULT_LOGGER.info("The use of user.roles is deprecated.  Please add a method " +
-      #    "role_symbols to your User model.") if defined?(RAILS_DEFAULT_LOGGER) and !user.respond_to?(:role_symbols)
-
+      
+      Rails.logger.info("The use of user.roles is deprecated.  Please add a method " +
+          "role_symbols to your User model.") if defined?(Rails) and Rails.respond_to?(:logger) and !user.respond_to?(:role_symbols)
+      
       roles = user.respond_to?(:role_symbols) ? user.role_symbols : user.roles
 
       raise AuthorizationUsageError, "User.#{user.respond_to?(:role_symbols) ? 'role_symbols' : 'roles'} " +
         "doesn't return an Array of Symbols (#{roles.inspect})" \
             if !roles.is_a?(Array) or (!roles.empty? and !roles[0].is_a?(Symbol))
 
-      (roles.empty? ? [:guest] : roles)
+      (roles.empty? ? [Authorization.default_role] : roles)
     end
     
     # Returns the role symbols and inherritted role symbols for the given user
@@ -294,30 +312,78 @@ module Authorization
       [user, roles, privileges]
     end
     
-    def flatten_roles (roles)
+    def flatten_roles (roles, flattened_roles = Set.new)
       # TODO caching?
-      flattened_roles = roles.clone.to_a
-      flattened_roles.each do |role|
-        flattened_roles.concat(@role_hierarchy[role]).uniq! if @role_hierarchy[role]
+      roles.reject {|role| flattened_roles.include?(role)}.each do |role|
+        flattened_roles << role
+        flatten_roles(@role_hierarchy[role], flattened_roles) if @role_hierarchy[role]
       end
+      flattened_roles.to_a
     end
     
     # Returns the privilege hierarchy flattened for given privileges in context.
-    def flatten_privileges (privileges, context = nil)
+    def flatten_privileges (privileges, context = nil, flattened_privileges = Set.new)
       # TODO caching?
       raise AuthorizationUsageError, "No context given or inferable from object" unless context
-      flattened_privileges = privileges.clone
-      flattened_privileges.each do |priv|
-        flattened_privileges.concat(@rev_priv_hierarchy[[priv, nil]]).uniq! if @rev_priv_hierarchy[[priv, nil]]
-        flattened_privileges.concat(@rev_priv_hierarchy[[priv, context]]).uniq! if @rev_priv_hierarchy[[priv, context]]
+      privileges.reject {|priv| flattened_privileges.include?(priv)}.each do |priv|
+        flattened_privileges << priv
+        flatten_privileges(@rev_priv_hierarchy[[priv, nil]], context, flattened_privileges) if @rev_priv_hierarchy[[priv, nil]]
+        flatten_privileges(@rev_priv_hierarchy[[priv, context]], context, flattened_privileges) if @rev_priv_hierarchy[[priv, context]]
       end
+      flattened_privileges.to_a
     end
     
     def matching_auth_rules (roles, privileges, context)
-      @auth_rules.select {|rule| rule.matches? roles, privileges, context}
+      @auth_rules.matching(roles, privileges, context)
     end
   end
   
+
+  class AuthorizationRuleSet
+    include Enumerable
+
+    def initialize rules
+      @rules = rules
+      reset!
+    end
+    def initialize_copy source
+      initialize @rules.collect {|rule| rule.clone}
+    end
+    def matching(roles, privileges, context)
+      roles = [roles] unless roles.is_a?(Array)
+      rules = cached_auth_rules[context] || []
+      rules.select do |rule|
+        rule.matches? roles, privileges, context
+      end
+    end
+    def delete rule
+      @rules.delete rule
+      reset!
+    end
+    def << rule
+      @rules << rule
+      reset!
+    end
+    def each &block
+      @rules.each &block
+    end
+
+    private
+    def reset!
+      @cached_auth_rules =nil
+    end
+    def cached_auth_rules
+      return @cached_auth_rules if @cached_auth_rules
+      @cached_auth_rules = {}
+      @rules.each do |rule|
+        rule.contexts.each do |context|
+          @cached_auth_rules[context] ||= []
+          @cached_auth_rules[context] << rule
+        end
+      end
+      @cached_auth_rules
+    end
+  end
   class AuthorizationRule
     attr_reader :attributes, :contexts, :role, :privileges, :join_operator,
         :source_file, :source_line
@@ -373,18 +439,27 @@ module Authorization
           exceptions << e
           nil
         end
-      end.flatten.compact
+      end
 
       if exceptions.length > 0 and (@join_operator == :and or exceptions.length == @attributes.length)
         raise NotAuthorized, "Missing authorization in collecting obligations: #{exceptions.map(&:to_s) * ", "}"
       end
 
       if @join_operator == :and and !obligations.empty?
-        merged_obligation = obligations.first
-        obligations[1..-1].each do |obligation|
-          merged_obligation = merged_obligation.deep_merge(obligation)
+        # cross product of OR'ed obligations in arrays
+        arrayed_obligations = obligations.map {|obligation| obligation.is_a?(Hash) ? [obligation] : obligation}
+        merged_obligations = arrayed_obligations.first
+        arrayed_obligations[1..-1].each do |inner_obligations|
+          previous_merged_obligations = merged_obligations
+          merged_obligations = inner_obligations.collect do |inner_obligation|
+            previous_merged_obligations.collect do |merged_obligation|
+              merged_obligation.deep_merge(inner_obligation)
+            end
+          end.flatten
         end
-        obligations = [merged_obligation]
+        obligations = merged_obligations
+      else
+        obligations = obligations.flatten.compact
       end
       obligations.empty? ? [{}] : obligations
     end
@@ -676,10 +751,10 @@ module Authorization
     end
   end
   
-  # Represents a pseudo-user to facilitate guest users in applications
-  class GuestUser
+  # Represents a pseudo-user to facilitate anonymous users in applications
+  class AnonymousUser
     attr_reader :role_symbols
-    def initialize (roles = [:guest])
+    def initialize (roles = [Authorization.default_role])
       @role_symbols = roles
     end
   end

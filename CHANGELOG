@@ -1,3 +1,18 @@
+** RELEASE 0.5.3 (May 25, 2011)
+
+* Bugfixes and documentation cleanup
+
+* Rails 3.1.rc1 compatibility [sb]
+
+* Added has_any_role?, has_any_role_with_hierarchy? [t.pickett66]
+
+* Allow changing the default role [dbloete]
+
+** RELEASE 0.5.2 (Dec 31, 2010) **
+
+* Bugfixes and documentation updates
+
+** RELEASE 0.5.1 (Sep 12, 2010) **
 
 ** RELEASE 0.5 (July 21, 2010) **
 

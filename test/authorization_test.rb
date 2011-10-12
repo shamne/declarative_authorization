@@ -69,6 +69,26 @@ class AuthorizationTest < Test::Unit::TestCase
     assert  engine.permit?(:test, :context => :permissions_4, :user => MockUser.new(:test_role))
     assert  engine.permit?(:test, :context => :permissions_5, :user => MockUser.new(:test_role))
   end
+
+  def test_permit_with_frozen_roles
+    reader = Authorization::Reader::DSLReader.new
+    reader.parse %{
+      authorization do
+        role :other_role do
+          includes :test_role
+        end
+        role :test_role do
+          has_permission_on :permissions, :to => :test
+        end
+      end
+    }
+    engine = Authorization::Engine.new(reader)
+    roles = [:other_role].freeze
+    assert_nothing_raised do
+      assert engine.permit?(:test, :context => :permissions,
+        :user => MockUser.new(:role_symbols => roles))
+    end
+  end
   
   def test_obligations_without_conditions
     reader = Authorization::Reader::DSLReader.new
@@ -294,6 +314,25 @@ class AuthorizationTest < Test::Unit::TestCase
     engine = Authorization::Engine.new(reader)
     assert engine.permit?(:test, :context => :permissions)
     assert !engine.permit?(:test, :context => :permissions_2)
+  end
+  
+  def test_default_role
+    previous_default_role = Authorization.default_role
+    Authorization.default_role = :anonymous
+    reader = Authorization::Reader::DSLReader.new
+    reader.parse %{
+      authorization do
+        role :anonymous do
+          has_permission_on :permissions, :to => :test
+        end
+      end
+    }
+    engine = Authorization::Engine.new(reader)
+    assert engine.permit?(:test, :context => :permissions)
+    assert !engine.permit?(:test, :context => :permissions, 
+      :user => MockUser.new(:guest))
+    # reset the default role, so that it does not mess up other tests
+    Authorization.default_role = previous_default_role
   end
   
   def test_invalid_user_model
@@ -1056,10 +1095,10 @@ class AuthorizationTest < Test::Unit::TestCase
 
     engine = Authorization::Engine.new(reader)
     cloned_engine = engine.clone
-    assert_not_equal engine.auth_rules[0].contexts.object_id,
-        cloned_engine.auth_rules[0].contexts.object_id
-    assert_not_equal engine.auth_rules[0].attributes[0].send(:instance_variable_get, :@conditions_hash)[:attr].object_id,
-        cloned_engine.auth_rules[0].attributes[0].send(:instance_variable_get, :@conditions_hash)[:attr].object_id
+    assert_not_equal engine.auth_rules.first.contexts.object_id,
+        cloned_engine.auth_rules.first.contexts.object_id
+    assert_not_equal engine.auth_rules.first.attributes.first.send(:instance_variable_get, :@conditions_hash)[:attr].object_id,
+        cloned_engine.auth_rules.first.attributes.first.send(:instance_variable_get, :@conditions_hash)[:attr].object_id
   end
 end
 
